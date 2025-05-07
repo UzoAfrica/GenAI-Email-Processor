@@ -1,7 +1,3 @@
-"""
-Email Classification Module
-Uses LLMs to categorize emails as 'product inquiry' or 'order request'
-"""
 
 from typing import Dict, List
 from langchain_openai import ChatOpenAI
@@ -11,35 +7,34 @@ from langchain_core.runnables import RunnableLambda
 from tenacity import retry, stop_after_attempt, wait_exponential
 from tqdm import tqdm
 import time
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class EmailClassifier:
     """LLM-powered email classification system with retry mechanisms and validation."""
 
-    def __init__(self, llm_config: Dict):
+    def __init__(self):
         """
-        Initialize classifier with LLM configuration.
-        
-        Args:
-            llm_config: Dictionary containing:
-                - api_key: OpenAI API key
-                - base_url: API endpoint URL
-                - model_name: LLM model identifier
-                - temperature: LLM creativity setting (0-1)
+        Initialize classifier using centralized configuration from .env and config files.
+        No longer requires manual llm_config parameter.
         """
-        self.llm = self._initialize_llm(llm_config)
+        self.llm = self._initialize_llm()
         self.classification_chain = self._build_classification_chain()
         self.classification_cache = {}  # For duplicate email handling
+        self.rate_limit_delay = float(os.getenv("RATE_LIMIT_DELAY", "1.5"))
 
-    def _initialize_llm(self, config: Dict) -> ChatOpenAI:
-        """Configure the LLM with proper error handling."""
+    def _initialize_llm(self) -> ChatOpenAI:
+        """Configure the LLM using environment variables"""
         try:
             return ChatOpenAI(
-                model=config.get("model_name", "gpt-4"),
-                temperature=config.get("temperature", 0),
-                openai_api_key=config["api_key"],
-                openai_api_base=config["base_url"],
-                max_retries=3
-            )
+                model=os.getenv("LLM_MODEL", "gpt-4"),
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0")),
+                openai_api_key=os.getenv("OPENAI_API_KEY"),
+                openai_api_base=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
+                max_retries=int(os.getenv("LLM_MAX_RETRIES", "3"))
         except Exception as e:
             raise ValueError(f"LLM initialization failed: {str(e)}")
 
@@ -89,8 +84,12 @@ class EmailClassifier:
         return text.strip()[:2000]  # Prevent token overflow
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(int(os.getenv("CLASSIFICATION_RETRY_ATTEMPTS", "3"))),
+        wait=wait_exponential(
+            multiplier=1,
+            min=float(os.getenv("RETRY_DELAY_MIN", "2")),
+            max=float(os.getenv("RETRY_DELAY_MAX", "10"))
+        ),
         reraise=True
     )
     def _classify_single(self, email: Dict) -> str:
@@ -105,11 +104,9 @@ class EmailClassifier:
             
             # Validation layer
             if "order" in result:
-                result = "order request"
-            elif "product" in result or "inquiry" in result:
-                result = "product inquiry"
+                result = os.getenv("CLASSIFICATION_ORDER", "order request")
             else:
-                result = "product inquiry"  # Default fallback
+                result = os.getenv("CLASSIFICATION_INQUIRY", "product inquiry")
                 
             self.classification_cache[email_hash] = result
             return result
@@ -118,7 +115,7 @@ class EmailClassifier:
             print(f"Classification failed for email {email.get('id', 'unknown')}: {e}")
             raise
 
-    def classify_batch(self, emails: List[Dict], batch_size: int = 20) -> List[Dict]:
+    def classify_batch(self, emails: List[Dict], batch_size: int = None) -> List[Dict]:
         """
         Process multiple emails with rate limiting and progress tracking.
         
@@ -127,7 +124,7 @@ class EmailClassifier:
                 - id: Unique email identifier
                 - subject: Email subject line
                 - message: Email body content
-            batch_size: Number of emails to process between pauses
+            batch_size: Number of emails to process between pauses (default from env)
             
         Returns:
             List of classification results with original IDs
@@ -135,7 +132,9 @@ class EmailClassifier:
         if not emails:
             return []
             
+        batch_size = batch_size or int(os.getenv("BATCH_SIZE", "20"))
         results = []
+        
         for i in tqdm(range(0, len(emails), batch_size), 
                     desc="Classifying emails",
                     unit="batch"):
@@ -151,11 +150,11 @@ class EmailClassifier:
                 except Exception as e:
                     results.append({
                         "email_id": email["id"],
-                        "category": "unclassified",
+                        "category": os.getenv("CLASSIFICATION_UNKNOWN", "unclassified"),
                         "error": str(e)
                     })
             
-            time.sleep(1.5)  # Rate limiting
+            time.sleep(self.rate_limit_delay)
             
         return results
 
