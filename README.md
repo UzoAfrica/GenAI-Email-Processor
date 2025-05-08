@@ -3,13 +3,15 @@
 ## **Project Overview**  
 The **GenAI Email Processor** is an AI-powered system designed to automate email classification, order processing, and customer inquiries using **Large Language Models (LLMs)**. It processes emails from a given dataset, categorizes them, checks product availability, generates order confirmations, and responds to product-related questions—all while dynamically updating stock levels.  
 
+
 ### **Key Features**  
  **Email Classification** – Automatically categorizes emails as either **"product inquiry"** or **"order request"** using LLM-based intent detection.  
 
  **Order Processing & Stock Management** –  
 - Verifies product availability in real time.  
 - Updates stock levels based on order fulfillment.  
-- Generates order statuses (`"created"` or `"out of stock"`).  
+- Generates order statuses (`"created"` or `"out of stock"`).
+  
 
  **Automated Response Generation** –  
 - Sends **personalized, production-ready emails** for:  
